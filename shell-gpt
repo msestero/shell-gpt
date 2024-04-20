@@ -1,0 +1,159 @@
+#!/bin/python3
+
+import os
+import sys
+import json
+import subprocess
+from openai import OpenAI
+
+INITIAL_MESSAGES = [
+    {
+        "role": "system",
+        "content": "You are an implementation of chatgpt as a shell. If a user inputs text that looks like a bash command return a json with {'run_command': <command>} other wise respond with {'response': <response>}. Also make sure that the json you send can be used with json.loads in python."
+    },
+    {
+        "role": "user",
+        "content": "ls -l"
+    },
+    {
+        "role": "assistant",
+        "content": "{\"run_command\": \"ls -l\"}"
+    },
+    {
+        "role": "user",
+        "content": "where is the file test.txt"
+    },
+    {
+        "role": "assistant",
+        "content": "{\"run_command\": \"find / -name 'test.txt'\"}"
+    },
+    {
+        "role": "user",
+        "content": "where is the file test.txt I know it is somewhere in my home folder"
+    },
+    {
+        "role": "assistant",
+        "content": "{\"run_command\": \"find ~/ -name 'test.txt'\"}"
+    },
+    {
+        "role": "user",
+        "content": "what are you capable of"
+    },
+    {
+        "role": "assistant",
+        "content": "{\"response\": \"As an AI, I can assist with a variety of tasks like answering questions, setting reminders, providing recommendations, and even helping to learn a new language. However, when operating as a shell, I can facilitate the execution of bash commands, route the commands to the server, and return the output. This includes operations like changing directories, listing files, and more.\"}"
+    }
+]
+
+class ShellGpt:
+
+    def __init__(self):
+        self.client = OpenAI()
+
+    @staticmethod
+    def get_prompt():
+        print(f"\n[{os.getcwd()}]")
+        return input("shell-gpt >> ")
+
+    @staticmethod
+    def format_prompt(role, content):
+        return {"role": role, "content": content}
+
+    def get_completion(self, messages):
+        try:
+            completion = self.client.chat.completions.create(model="gpt-3.5-turbo-0125", messages=messages)
+            return completion.choices[0].message.content
+        except Exception as e:
+            print("Error during API call:", e)
+            return f"Error during API call: e"
+
+    @staticmethod
+    def run_command(cmd):
+        process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
+
+        try:
+            # Continuously read and display output from the subprocess
+            tot_output = ""
+            while True:
+                output = process.stdout.readline()
+                tot_output += output
+                if output:
+                    sys.stdout.write(output)
+                    sys.stdout.flush()
+                else:
+                    # Check if the process has ended and no more output is available
+                    if process.poll() is not None:
+                        break
+
+            # Read any remaining output after process has finished
+            remaining_output = process.stdout.read()
+            if remaining_output:
+                sys.stdout.write(remaining_output)
+                sys.stdout.flush()
+
+            # Now handle any error output
+            error_output = process.stderr.read()
+            if error_output:
+                sys.stderr.write(error_output)
+                sys.stderr.flush()
+
+        except KeyboardInterrupt:
+            # Allows the user to stop the script with Ctrl-C
+            sys.stderr.write("\nProcess interrupted by user.\n")
+        finally:
+            output = process.stderr.read()
+            if output:
+                tot_output = output
+            if process.poll() is None:
+                process.kill()  # Ensure to kill the process if still running
+            process.stdout.close()
+            process.stderr.close()
+
+        return tot_output  # Return the exit code of the subprocess
+
+
+    @staticmethod
+    def get_data(response):
+        try:
+            data = json.loads(response)
+            return data
+        except Exception as e:
+            return {"error": e}
+
+    def shell_line(self, messages, prompt):
+        messages.append(self.format_prompt("user", prompt))
+        assistant_response = self.get_completion(messages)
+        if not assistant_response:
+            return 
+
+        messages.append(self.format_prompt("assistant", assistant_response))
+
+        data = self.get_data(assistant_response)
+        print("here")
+        if "run_command" in data:
+            command_result = self.run_command(data.get("run_command"))
+            messages.append(self.format_prompt("user", command_result))
+        if "response" in data:
+            print(data["response"])
+        if "error" in data:
+            print(data["error"])
+
+    def run(self):
+        messages = INITIAL_MESSAGES
+        while True:
+            user_inp = self.get_prompt()
+            if user_inp == "quit":
+                return
+            elif user_inp == "audit":
+                print(messages)
+            elif user_inp == "reset":
+                messages = INITIAL_MESSAGES
+            else:
+                self.shell_line(messages, user_inp)
+
+def clear():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+if __name__ == "__main__":
+    clear()
+    ShellGpt().run()
